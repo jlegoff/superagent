@@ -1,0 +1,6 @@
+apiKey: key
+agents:
+  - type: nrdot
+    name: nrdot-name
+  - type: otelcol
+    name: otelcol-name
