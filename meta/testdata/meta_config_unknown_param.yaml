@@ -1,6 +1,7 @@
 apiKey: key
 dataDir: /etc/newrelic/meta
 logDir: /var/log/newrelic/meta
+unknownParam: wat
 agents:
   - type: nrdot
     name: nrdot-name

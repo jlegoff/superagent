@@ -1,4 +1,4 @@
-module meta
+module superagent
 
 go 1.20
 
