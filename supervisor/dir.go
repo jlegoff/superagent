@@ -6,7 +6,7 @@ import (
 
 func EnsureDirExists(dirName string) error {
 	if _, err := os.Stat(dirName); os.IsNotExist(err) {
-		err := os.Mkdir(dirName, 0755)
+		err := os.MkdirAll(dirName, 0755)
 		if err != nil {
 			return err
 		}

@@ -3,6 +3,7 @@ package meta
 import (
 	"fmt"
 	"gopkg.in/yaml.v3"
+	"path/filepath"
 	"superagent/otelcol"
 	"superagent/supervisor"
 
@@ -56,7 +57,7 @@ func (p *MetaParser) Unmarshal(b []byte) (map[string]interface{}, error) {
 	if !found {
 		return nil, fmt.Errorf("No dataDir defined")
 	}
-	logDir, found := firstPass["dataDir"]
+	logDir, found := firstPass["logDir"]
 	if !found {
 		return nil, fmt.Errorf("No logDir defined")
 	}
@@ -85,27 +86,43 @@ func (p *MetaParser) Unmarshal(b []byte) (map[string]interface{}, error) {
 	return secondPass, nil
 }
 
-func parseAgent(in interface{}, dataDir string, logDir string) (Agent, error) {
+func parseAgent(in interface{}, baseDataDir string, baseLogDir string) (Agent, error) {
 	config := in.(map[string]interface{})
-	agentType := config["type"]
+	agentName, found := findString(config, "name")
+	if !found {
+		return nil, fmt.Errorf("No name defined for agent")
+	}
+
+	agentType, found := findString(config, "type")
+	if !found {
+		return nil, fmt.Errorf("Undefined type for agent '%s'", config["name"].(string))
+	}
+	dataDir := filepath.Join(baseDataDir, agentType, agentName)
+	logDir := filepath.Join(baseLogDir, agentType, agentName)
 	switch agentType {
 	case "otelcol":
 		exec, found := config["executable"]
 		if !found {
 			return nil, fmt.Errorf("No executable defined")
 		}
-		return otelcol.NewOtelCol(config["name"].(string), dataDir, logDir, exec.(string)), nil
+		return otelcol.NewOtelCol(agentName, dataDir, logDir, exec.(string)), nil
 	case "nrdot":
 		exec, found := config["executable"]
 		if !found {
 			return nil, fmt.Errorf("No executable defined")
 		}
-		return otelcol.NewNrDot(config["name"].(string), dataDir, logDir, exec.(string)), nil
-	case nil:
-		return nil, fmt.Errorf("Undefined type for agent '%s'", config["name"].(string))
+		return otelcol.NewNrDot(agentName, dataDir, logDir, exec.(string)), nil
 	default:
 		return nil, fmt.Errorf("Unknown agent type '%s'", agentType)
 	}
+}
+
+func findString(config map[string]interface{}, param string) (string, bool) {
+	value, found := config[param]
+	if !found {
+		return "", found
+	}
+	return value.(string), true
 }
 
 func (p *MetaParser) Marshal(o map[string]interface{}) ([]byte, error) {
