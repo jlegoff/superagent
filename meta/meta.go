@@ -1,19 +1,12 @@
 package meta
 
 import (
-	"fmt"
-	"path/filepath"
-	"superagent/otelcol"
+	"superagent/supervisor"
 )
 
 type MetaAgent struct {
 	config      Meta
-	supervisors map[string]Supervisor
-}
-
-type Supervisor interface {
-	Start() error
-	Stop() error
+	supervisors map[string]supervisor.Supervisor
 }
 
 func NewMetaAgent(configPath string) (*MetaAgent, error) {
@@ -25,17 +18,10 @@ func NewMetaAgent(configPath string) (*MetaAgent, error) {
 }
 
 func (m *MetaAgent) Start() error {
-	m.supervisors = make(map[string]Supervisor)
+	m.supervisors = make(map[string]supervisor.Supervisor)
 	for _, agentConfig := range m.config.Agents {
-		err := EnsureDirExists(m.getDataDir(agentConfig.GetName(), agentConfig.GetType()))
-		if err != nil {
-			return err
-		}
-		err = EnsureDirExists(m.getLogDir(agentConfig.GetName(), agentConfig.GetType()))
-		if err != nil {
-			return err
-		}
-		sup, err := m.getSupervisor(agentConfig.GetName(), agentConfig.GetType())
+		sup := agentConfig.GetSupervisor()
+		err := sup.Setup()
 		if err != nil {
 			return err
 		}
@@ -51,21 +37,12 @@ func (m *MetaAgent) Start() error {
 	return nil
 }
 
-func (m *MetaAgent) getDataDir(agentName string, agentType string) string {
-	return filepath.Join(m.config.DataDir, agentType, agentName)
-}
-
-func (m *MetaAgent) getLogDir(agentName string, agentType string) string {
-	return filepath.Join(m.config.LogDir, agentType, agentName)
-}
-
-func (m *MetaAgent) getSupervisor(agentName string, agentType string) (Supervisor, error) {
-	dataDir := m.getDataDir(agentName, agentType)
-	logDir := m.getLogDir(agentName, agentType)
-	switch agentType {
-	case "otelcol":
-		return otelcol.NewOtelColSupervisor(dataDir, logDir), nil
-	default:
-		return nil, fmt.Errorf("Unknown agent type %s", agentType)
+func (m *MetaAgent) Stop() error {
+	for _, sup := range m.supervisors {
+		err := sup.Stop()
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }

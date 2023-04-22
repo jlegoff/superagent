@@ -5,5 +5,7 @@ unknownParam: wat
 agents:
   - type: nrdot
     name: nrdot-name
+    executable: /usr/bin/nrdot
   - type: otelcol
     name: otelcol-name
+    executable: /usr/bin/otelcol

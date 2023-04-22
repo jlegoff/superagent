@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"gopkg.in/yaml.v3"
 	"superagent/otelcol"
+	"superagent/supervisor"
 
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/providers/file"
@@ -19,6 +20,7 @@ type Meta struct {
 type Agent interface {
 	GetType() string
 	GetName() string
+	GetSupervisor() supervisor.Supervisor
 }
 
 func LoadConfig(path string) (*Meta, error) {
@@ -50,13 +52,21 @@ func (p *MetaParser) Unmarshal(b []byte) (map[string]interface{}, error) {
 	secondPass := make(map[string]interface{})
 	agents := make([]Agent, 0)
 	seenAgents := make(map[string]string)
+	dataDir, found := firstPass["dataDir"]
+	if !found {
+		return nil, fmt.Errorf("No dataDir defined")
+	}
+	logDir, found := firstPass["dataDir"]
+	if !found {
+		return nil, fmt.Errorf("No logDir defined")
+	}
 	for k, v := range firstPass {
 		switch k {
 		case "apiKey", "dataDir", "logDir":
 			secondPass[k] = v
 		case "agents":
 			for _, a := range firstPass[k].([]interface{}) {
-				parsedAgent, err := parseAgent(a)
+				parsedAgent, err := parseAgent(a, dataDir.(string), logDir.(string))
 				if err != nil {
 					return nil, err
 				}
@@ -75,19 +85,22 @@ func (p *MetaParser) Unmarshal(b []byte) (map[string]interface{}, error) {
 	return secondPass, nil
 }
 
-func parseAgent(in interface{}) (Agent, error) {
+func parseAgent(in interface{}, dataDir string, logDir string) (Agent, error) {
 	config := in.(map[string]interface{})
 	agentType := config["type"]
-	for k, v := range config {
-		if k == "type" && v == "otelcol" {
-			return otelcol.NewOtelCol(config["name"].(string)), nil
-		}
-	}
 	switch agentType {
 	case "otelcol":
-		return otelcol.NewOtelCol(config["name"].(string)), nil
+		exec, found := config["executable"]
+		if !found {
+			return nil, fmt.Errorf("No executable defined")
+		}
+		return otelcol.NewOtelCol(config["name"].(string), dataDir, logDir, exec.(string)), nil
 	case "nrdot":
-		return otelcol.NewNrDot(config["name"].(string)), nil
+		exec, found := config["executable"]
+		if !found {
+			return nil, fmt.Errorf("No executable defined")
+		}
+		return otelcol.NewNrDot(config["name"].(string), dataDir, logDir, exec.(string)), nil
 	case nil:
 		return nil, fmt.Errorf("Undefined type for agent '%s'", config["name"].(string))
 	default:

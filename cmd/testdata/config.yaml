@@ -1,0 +1,10 @@
+apiKey: key
+dataDir: /tmp/meta/data
+logDir: /tmp/meta/log
+agents:
+  - type: otelcol
+    name: wat
+    executable: echo
+  - type: otelcol
+    name: wat2
+    executable: echo

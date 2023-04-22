@@ -4,5 +4,7 @@ logDir: /var/log/newrelic/meta
 agents:
   - type: nrdot
     name: nrdot-name
+    executable: /usr/bin/nrdot
   - type: otelcol
     name: nrdot-name
+    executable: /usr/bin/otelcol
