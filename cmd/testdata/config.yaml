@@ -1,4 +1,5 @@
 apiKey: key
+opampUrl: https://opamp.staging-service.newrelic.com:443/v1/opamp
 dataDir: /tmp/meta/data
 logDir: /tmp/meta/log
 agents:

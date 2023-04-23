@@ -2,20 +2,20 @@ package meta
 
 import (
 	"fmt"
+	"github.com/knadh/koanf"
+	"github.com/knadh/koanf/providers/file"
 	"gopkg.in/yaml.v3"
 	"path/filepath"
 	"superagent/otelcol"
 	"superagent/supervisor"
-
-	"github.com/knadh/koanf"
-	"github.com/knadh/koanf/providers/file"
 )
 
 type Meta struct {
-	ApiKey  string
-	DataDir string
-	LogDir  string
-	Agents  []Agent
+	ApiKey   string
+	OpampUrl string
+	DataDir  string
+	LogDir   string
+	Agents   []Agent
 }
 
 type Agent interface {
@@ -61,13 +61,21 @@ func (p *MetaParser) Unmarshal(b []byte) (map[string]interface{}, error) {
 	if !found {
 		return nil, fmt.Errorf("No logDir defined")
 	}
+	opampUrl, found := firstPass["opampUrl"]
+	if !found {
+		return nil, fmt.Errorf("No opampUrl defined")
+	}
+	apiKey, found := firstPass["apiKey"]
+	if !found {
+		return nil, fmt.Errorf("No apiKey defined")
+	}
 	for k, v := range firstPass {
 		switch k {
-		case "apiKey", "dataDir", "logDir":
+		case "apiKey", "dataDir", "logDir", "opampUrl":
 			secondPass[k] = v
 		case "agents":
 			for _, a := range firstPass[k].([]interface{}) {
-				parsedAgent, err := parseAgent(a, dataDir.(string), logDir.(string))
+				parsedAgent, err := parseAgent(a, dataDir.(string), logDir.(string), opampUrl.(string), apiKey.(string))
 				if err != nil {
 					return nil, err
 				}
@@ -86,7 +94,7 @@ func (p *MetaParser) Unmarshal(b []byte) (map[string]interface{}, error) {
 	return secondPass, nil
 }
 
-func parseAgent(in interface{}, baseDataDir string, baseLogDir string) (Agent, error) {
+func parseAgent(in interface{}, baseDataDir string, baseLogDir string, opampUrl string, apiKey string) (Agent, error) {
 	config := in.(map[string]interface{})
 	agentName, found := findString(config, "name")
 	if !found {
@@ -105,7 +113,7 @@ func parseAgent(in interface{}, baseDataDir string, baseLogDir string) (Agent, e
 		if !found {
 			return nil, fmt.Errorf("No executable defined")
 		}
-		return otelcol.NewOtelCol(agentName, dataDir, logDir, exec.(string)), nil
+		return otelcol.NewOtelCol(agentName, dataDir, logDir, exec.(string), opampUrl, apiKey), nil
 	case "nrdot":
 		exec, found := config["executable"]
 		if !found {

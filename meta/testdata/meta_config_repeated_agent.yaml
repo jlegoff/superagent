@@ -1,4 +1,5 @@
 apiKey: key
+opampUrl: url
 dataDir: /etc/newrelic/meta
 logDir: /var/log/newrelic/meta
 agents:
