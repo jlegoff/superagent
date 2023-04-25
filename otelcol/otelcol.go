@@ -4,15 +4,13 @@ import (
 	"context"
 	"fmt"
 	"github.com/oklog/ulid/v2"
-	"github.com/open-telemetry/opamp-go/client"
 	"github.com/open-telemetry/opamp-go/client/types"
-	"github.com/open-telemetry/opamp-go/protobufs"
 	"go.uber.org/zap"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"superagent/opamp"
 	"superagent/supervisor"
 )
 
@@ -26,10 +24,9 @@ type OtelCol struct {
 }
 
 type OtelColSupervisor struct {
-	Config    OtelCol
-	Commander *Commander
-	// The OpAMP client to connect to the OpAMP Server.
-	OpampClient client.OpAMPClient
+	Config      OtelCol
+	Commander   *Commander
+	OpampClient *opamp.Client
 	Logger      types.Logger
 	InstanceId  ulid.ULID
 }
@@ -51,130 +48,92 @@ func (collector *OtelCol) GetSupervisor() supervisor.Supervisor {
 	return &OtelColSupervisor{Config: *collector, Logger: logger}
 }
 
-func (supervisor *OtelColSupervisor) Start() error {
+func (s *OtelColSupervisor) Start() error {
 	logger, err := zap.NewDevelopment()
 	if err != nil {
 		return err
 	}
-	commander, err := NewCommander(logger, supervisor.Config.BinPath, supervisor.getConfigPaths()...)
+
+	s.InstanceId, err = supervisor.GetOrCreateInstanceId(s.Config.DataDir)
 	if err != nil {
 		return err
 	}
-	supervisor.Commander = commander
-	err = supervisor.Commander.Start(context.Background())
+
+	commander, err := NewCommander(logger, s.Config.BinPath, s.getConfigPaths()...)
+	if err != nil {
+		return err
+	}
+	s.Commander = commander
+	err = s.Commander.Start(context.Background())
 	if err != nil {
 		return fmt.Errorf("Cannot start the agent: %s", err)
 	}
-	err = supervisor.startOpAMP()
+
+	opampClient := opamp.NewOpampClient(
+		opamp.Config{
+			OpampUrl: s.Config.OpampUrl,
+			ApiKey:   s.Config.ApiKey,
+		},
+		s,
+		s.Logger)
+
+	s.OpampClient = &opampClient
+	err = s.OpampClient.StartOpAMP()
 	if err != nil {
-		return fmt.Errorf("Cannot start the opamp server %s", err)
+		return fmt.Errorf("Cannot start the opamp client %s", err)
 	}
 	return nil
 }
 
-func (supervisor *OtelColSupervisor) getConfigPaths() []string {
-	return []string{filepath.Join(supervisor.Config.DataDir, "configuration", "otelcol.yaml")}
+func (s *OtelColSupervisor) getConfigPaths() []string {
+	return []string{filepath.Join(s.Config.DataDir, "configuration", "otelcol.yaml")}
 }
 
-func (supervisor *OtelColSupervisor) Stop() error {
-	return supervisor.Commander.Stop(context.Background())
+func (s *OtelColSupervisor) Stop() error {
+	return s.Commander.Stop(context.Background())
 }
 
-func (sup *OtelColSupervisor) Setup() error {
-	err := supervisor.EnsureDirExists(sup.Config.DataDir)
+func (s *OtelColSupervisor) Setup() error {
+	err := supervisor.EnsureDirExists(s.Config.DataDir)
 	if err != nil {
 		return err
 	}
-	err = supervisor.EnsureDirExists(sup.Config.LogDir)
+	err = supervisor.EnsureDirExists(s.Config.LogDir)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (s *OtelColSupervisor) startOpAMP() error {
-	s.OpampClient = client.NewHTTP(s.Logger)
-
-	settings := types.StartSettings{
-		OpAMPServerURL: s.Config.OpampUrl,
-		InstanceUid:    s.InstanceId.String(),
-		Header:         http.Header{"api-key": {s.Config.ApiKey}},
-		Callbacks: types.CallbacksStruct{
-			OnConnectFunc: func() {
-				s.Logger.Debugf("Connected to the server.")
-			},
-			OnConnectFailedFunc: func(err error) {
-				s.Logger.Errorf("Failed to connect to the server: %v", err)
-			},
-			OnErrorFunc: func(err *protobufs.ServerErrorResponse) {
-				s.Logger.Errorf("Server returned an error response: %v", err.ErrorMessage)
-			},
-			GetEffectiveConfigFunc: func(ctx context.Context) (*protobufs.EffectiveConfig, error) {
-				return s.createEffectiveConfigMsg(), nil
-			},
-			OnMessageFunc: s.onMessage,
-		},
-		Capabilities: protobufs.AgentCapabilities_AgentCapabilities_AcceptsRemoteConfig |
-			protobufs.AgentCapabilities_AgentCapabilities_ReportsRemoteConfig |
-			protobufs.AgentCapabilities_AgentCapabilities_ReportsEffectiveConfig |
-			protobufs.AgentCapabilities_AgentCapabilities_ReportsOwnMetrics |
-			protobufs.AgentCapabilities_AgentCapabilities_ReportsHealth,
-	}
-	err := s.OpampClient.SetAgentDescription(s.createAgentDescription())
+func (s *OtelColSupervisor) GetAgentDescription() opamp.Agent {
+	hostName, err := os.Hostname()
 	if err != nil {
-		return err
+		s.Logger.Errorf("Could not get hostname: %s", err)
+	}
+	host := opamp.Host{
+		Name: hostName,
+		Id:   hostName,
 	}
 
-	err = s.OpampClient.SetHealth(&protobufs.AgentHealth{Healthy: false})
-	if err != nil {
-		return err
+	operatingSystem := opamp.Os{
+		Type: runtime.GOOS,
 	}
 
-	s.Logger.Debugf("Starting OpAMP client...")
-
-	err = s.OpampClient.Start(context.Background(), settings)
-	if err != nil {
-		return err
+	service := opamp.Service{
+		Name:    "io.opentelemetry.collector",
+		Version: "0.0.1",
 	}
-
-	s.Logger.Debugf("OpAMP Client started.")
-
-	return nil
-}
-
-func (s *OtelColSupervisor) createAgentDescription() *protobufs.AgentDescription {
-	hostname, _ := os.Hostname()
-
-	return &protobufs.AgentDescription{
-		IdentifyingAttributes: []*protobufs.KeyValue{
-			keyVal("service.name", "io.opentelemetry.collector"),
-			keyVal("service.version", "0.0.1"),
-		},
-		NonIdentifyingAttributes: []*protobufs.KeyValue{
-			keyVal("os.type", runtime.GOOS),
-			keyVal("host.name", hostname),
-		},
+	return opamp.Agent{
+		InstanceId: s.InstanceId,
+		Host:       host,
+		Os:         operatingSystem,
+		Service:    service,
 	}
 }
 
-func keyVal(key, val string) *protobufs.KeyValue {
-	return &protobufs.KeyValue{
-		Key: key,
-		Value: &protobufs.AnyValue{
-			Value: &protobufs.AnyValue_StringValue{StringValue: val},
-		},
-	}
+func (s *OtelColSupervisor) GetEffectiveConfigMap() map[string]opamp.ConfigFile {
+	return make(map[string]opamp.ConfigFile)
 }
 
-func (s *OtelColSupervisor) createEffectiveConfigMsg() *protobufs.EffectiveConfig {
-	cfg := &protobufs.EffectiveConfig{
-		ConfigMap: &protobufs.AgentConfigMap{
-			ConfigMap: map[string]*protobufs.AgentConfigFile{},
-		},
-	}
-	return cfg
-}
-
-func (s *OtelColSupervisor) onMessage(ctx context.Context, msg *types.MessageData) {
-
+func (s *OtelColSupervisor) ApplyRemoteConfig(context.Context, opamp.RemoteConfig) {
 }
