@@ -6,6 +6,7 @@ import (
 	"github.com/open-telemetry/opamp-go/client/types"
 	"github.com/open-telemetry/opamp-go/protobufs"
 	"net/http"
+	"time"
 )
 
 type Config struct {
@@ -144,10 +145,44 @@ func (c *Client) onMessage(ctx context.Context, msg *types.MessageData) {
 	}
 }
 
-func (c *Client) SetUnhealthy(lastError string) error {
-	return c.OpampClient.SetHealth(&protobufs.AgentHealth{Healthy: false, LastError: lastError})
+func (c *Client) SetUnhealthy(lastError string) {
+	err := c.OpampClient.SetHealth(&protobufs.AgentHealth{Healthy: false, LastError: lastError})
+	if err != nil {
+		c.Logger.Errorf("cannot set health %v", err)
+	}
 }
 
-func (c *Client) SetHealthy(startTime uint64) error {
-	return c.OpampClient.SetHealth(&protobufs.AgentHealth{Healthy: true, StartTimeUnixNano: startTime})
+func (c *Client) SetHealthy(startTime time.Time) {
+	err := c.OpampClient.SetHealth(&protobufs.AgentHealth{Healthy: true, StartTimeUnixNano: uint64(startTime.UnixNano())})
+	if err != nil {
+		c.Logger.Errorf("cannot set health %v", err)
+	}
+}
+
+func (c *Client) SetRemoteConfigError(lastHash string, errorMessage string) {
+	err := c.OpampClient.SetRemoteConfigStatus(&protobufs.RemoteConfigStatus{
+		LastRemoteConfigHash: []byte(lastHash),
+		Status:               protobufs.RemoteConfigStatuses_RemoteConfigStatuses_FAILED,
+		ErrorMessage:         errorMessage,
+	})
+	if err != nil {
+		c.Logger.Errorf("cannot set remote config error %v", err)
+	}
+}
+
+func (c *Client) SetRemoteConfigApplied(lastHash string) {
+	err := c.OpampClient.SetRemoteConfigStatus(&protobufs.RemoteConfigStatus{
+		LastRemoteConfigHash: []byte(lastHash),
+		Status:               protobufs.RemoteConfigStatuses_RemoteConfigStatuses_APPLIED,
+	})
+	if err != nil {
+		c.Logger.Errorf("cannot set remote config status %v", err)
+	}
+}
+
+func (c *Client) SetRemoteConfig(ctx context.Context) {
+	err := c.OpampClient.UpdateEffectiveConfig(ctx)
+	if err != nil {
+		c.Logger.Errorf("cannot set remote config %v", err)
+	}
 }

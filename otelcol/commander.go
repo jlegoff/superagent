@@ -4,20 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-telemetry/opamp-go/client/types"
 	"log"
 	"os"
 	"os/exec"
 	"sync/atomic"
 	"syscall"
 	"time"
-
-	"go.uber.org/zap"
 )
 
 // Commander can start/stop/restat the Agent executable and also watch for a signal
 // for the Agent process to finish.
 type Commander struct {
-	logger     *zap.Logger
+	logger     types.Logger
 	executable string
 	args       []string
 	cmd        *exec.Cmd
@@ -26,7 +25,7 @@ type Commander struct {
 	running    int64
 }
 
-func NewCommander(logger *zap.Logger, executable string, args ...string) (*Commander, error) {
+func NewCommander(logger types.Logger, executable string, args ...string) (*Commander, error) {
 	if executable == "" {
 		return nil, errors.New("executable must not be empty")
 	}
@@ -42,7 +41,7 @@ func NewCommander(logger *zap.Logger, executable string, args ...string) (*Comma
 // Agent's stdout and stderr are written to a file.
 func (c *Commander) Start(ctx context.Context) error {
 	log.Default().Print()
-	c.logger.Debug(fmt.Sprintf("Starting agent %s", c.executable))
+	c.logger.Debugf(fmt.Sprintf("Starting agent %s", c.executable))
 
 	logFilePath := "agent.log"
 	logFile, err := os.Create(logFilePath)
@@ -63,7 +62,7 @@ func (c *Commander) Start(ctx context.Context) error {
 		return err
 	}
 
-	c.logger.Debug(fmt.Sprintf("Agent process started, PID=%d", c.cmd.Process.Pid))
+	c.logger.Debugf(fmt.Sprintf("Agent process started, PID=%d", c.cmd.Process.Pid))
 	atomic.StoreInt64(&c.running, 1)
 
 	go c.watch()
@@ -122,7 +121,7 @@ func (c *Commander) Stop(ctx context.Context) error {
 		return nil
 	}
 
-	c.logger.Debug(fmt.Sprintf("Stopping agent process, PID=%v", c.cmd.Process.Pid))
+	c.logger.Debugf(fmt.Sprintf("Stopping agent process, PID=%v", c.cmd.Process.Pid))
 
 	// Gracefully signal process to stop.
 	if err := c.cmd.Process.Signal(syscall.SIGTERM); err != nil {
@@ -144,12 +143,12 @@ func (c *Commander) Stop(ctx context.Context) error {
 			break
 		case <-finished:
 			// Process is successfully finished.
-			c.logger.Debug(fmt.Sprintf("Agent process PID=%v successfully stopped.", c.cmd.Process.Pid))
+			c.logger.Debugf(fmt.Sprintf("Agent process PID=%v successfully stopped.", c.cmd.Process.Pid))
 			return
 		}
 
 		// Time is out. Kill the process.
-		c.logger.Debug(
+		c.logger.Debugf(
 			fmt.Sprintf("Agent process PID=%d is not responding to SIGTERM. Sending SIGKILL to kill forcedly.",
 				c.cmd.Process.Pid))
 		if innerErr = c.cmd.Process.Signal(syscall.SIGKILL); innerErr != nil {
